@@ -41,18 +41,18 @@ async function fetchSummary(date) {
   }
 }
 
-// Yazio не отдаёт «съедено» одним числом — суммируем энергию по приёмам пищи.
-function consumedEnergy(summary) {
+// Yazio не отдаёт «съедено» одним числом — суммируем нутриент по приёмам пищи.
+function consumedNutrient(summary, key) {
   const meals = summary?.meals || {};
   let total = 0;
   for (const meal of Object.values(meals)) {
-    const e = meal?.nutrients?.['energy.energy'];
-    if (typeof e === 'number') total += e;
+    const v = meal?.nutrients?.[key];
+    if (typeof v === 'number') total += v;
   }
   return total;
 }
 
-// Цель = энергетическая цель (+ активность, если Yazio добавляет её в бюджет).
+// Цель по энергии = energy.energy (+ активность, если Yazio добавляет её в бюджет).
 function goalEnergy(summary) {
   const base = summary?.goals?.['energy.energy'] ?? 0;
   const activity = summary?.consume_activity_energy ? (summary?.activity_energy || 0) : 0;
@@ -60,13 +60,25 @@ function goalEnergy(summary) {
 }
 
 function buildText(summary) {
-  const consumed = Math.round(consumedEnergy(summary));
+  const consumed = Math.round(consumedNutrient(summary, 'energy.energy'));
   const goal = Math.round(goalEnergy(summary));
   const remaining = goal - consumed;
-  if (remaining >= 0) {
-    return `Съедено ${consumed} из ${goal} ккал, осталось ${remaining}.`;
-  }
-  return `Съедено ${consumed} из ${goal} ккал, превышение на ${-remaining}.`;
+
+  const goals = summary?.goals || {};
+  const protein = Math.round(consumedNutrient(summary, 'nutrient.protein'));
+  const fat = Math.round(consumedNutrient(summary, 'nutrient.fat'));
+  const carb = Math.round(consumedNutrient(summary, 'nutrient.carb'));
+  const proteinGoal = Math.round(goals['nutrient.protein'] ?? 0);
+  const fatGoal = Math.round(goals['nutrient.fat'] ?? 0);
+  const carbGoal = Math.round(goals['nutrient.carb'] ?? 0);
+
+  const energyLine = remaining >= 0
+    ? `Съедено ${consumed} из ${goal} ккал, осталось ${remaining}.`
+    : `Съедено ${consumed} из ${goal} ккал, превышение на ${-remaining}.`;
+
+  const macroLine = `Белки ${protein} из ${proteinGoal}, жиры ${fat} из ${fatGoal}, углеводы ${carb} из ${carbGoal} грамм.`;
+
+  return `${energyLine} ${macroLine}`;
 }
 
 function aliceResponse(text, session) {
