@@ -44,7 +44,8 @@ async function fetchSummary(date) {
 // Кэш сводки в памяти. У Алисы на устройстве жёсткий таймаут (~2.5-3 с), а вызов
 // Yazio бывает медленным (до ~2 с) — поэтому отдаём кэш мгновенно, а свежесть
 // поддерживаем фоновым обновлением. Для «калорий за сегодня» задержка не критична.
-const REFRESH_MS = 90_000; // как часто обновляем в фоне
+const REFRESH_MS = 90_000; // базовый интервал фонового обновления
+const REFRESH_JITTER_MS = 20_000; // случайный разброс ±, чтобы не бить по Yazio ровно по расписанию
 const cache = { date: null, summary: null, ts: 0 };
 let refreshing = null;
 
@@ -64,6 +65,15 @@ async function refreshCache() {
     }
   })();
   return refreshing;
+}
+
+// Самоперепланирующийся фоновый рефреш с джиттером: REFRESH_MS ± REFRESH_JITTER_MS.
+function scheduleRefresh() {
+  const delay = REFRESH_MS + (Math.random() * 2 - 1) * REFRESH_JITTER_MS;
+  setTimeout(async () => {
+    await refreshCache();
+    scheduleRefresh();
+  }, delay).unref?.();
 }
 
 // Возвращает сводку для ответа Алисе. Если кэш свежий и за сегодня — мгновенно,
@@ -180,5 +190,5 @@ const server = createServer((req, res) => {
 server.listen(Number(PORT), '0.0.0.0', () => {
   console.error(`✅ Alice webhook слушает :${PORT} (TZ=${TZ}), путь /alice/<секрет>`);
   refreshCache(); // прогрев кэша на старте, чтобы первый запрос был мгновенным
-  setInterval(refreshCache, REFRESH_MS); // поддерживаем кэш тёплым в фоне
+  scheduleRefresh(); // поддерживаем кэш тёплым в фоне с джиттером
 });
