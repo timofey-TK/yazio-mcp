@@ -1,3 +1,5 @@
 .env
 *.log
 .DS_Store
+yazio-mcp-src/node_modules/
+yazio-mcp-src/dist/
