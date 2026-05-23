@@ -5,8 +5,6 @@ services:
     environment:
       YAZIO_USERNAME: ${YAZIO_USERNAME}
       YAZIO_PASSWORD: ${YAZIO_PASSWORD}
-    volumes:
-      - yazio_data:/app/data
     expose:
       - "8000"
 
@@ -29,4 +27,3 @@ services:
 volumes:
   caddy_data:
   caddy_config:
-  yazio_data:

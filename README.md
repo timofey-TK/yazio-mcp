@@ -1,23 +1,21 @@
 # yazio-mcp self-hosted
 
-MCP-сервер для Yazio (форк [edgarcrssn/yazio-mcp](https://github.com/edgarcrssn/yazio-mcp)), завёрнутый в streamable-HTTP через [mcp-streamablehttp-proxy](https://github.com/jamesainslie/mcp-streamablehttp-proxy) и опубликованный по HTTPS через [Caddy](https://caddyserver.com) с Let's Encrypt. Цель — подключить из мобильного Claude как кастомный коннектор.
+MCP-сервер для Yazio (форк [fliptheweb/yazio-mcp](https://github.com/fliptheweb/yazio-mcp), исходники завендорены в `yazio-mcp-src/` с одним дописанным тулом — `log_quick_entry`), завёрнутый в streamable-HTTP через [mcp-streamablehttp-proxy](https://github.com/jamesainslie/mcp-streamablehttp-proxy) и опубликованный по HTTPS через [Caddy](https://caddyserver.com) с Let's Encrypt. Цель — подключить из мобильного Claude и ChatGPT Apps как кастомный коннектор.
 
-## Почему edgarcrssn, а не fliptheweb
+## Зачем форк форка
 
-Изначально использовался `fliptheweb/yazio-mcp` (npm), но в нём `add_user_consumed_item` требует `product_id` из базы Yazio — нельзя залогировать произвольное блюдо с estimated макросами (ресторан, домашнее).
+Upstream `fliptheweb/yazio-mcp` хорош, но `add_user_consumed_item` требует `product_id` из базы Yazio — нельзя залогировать ресторанное/домашнее блюдо со свободно оценёнными макросами.
 
-Форк `edgarcrssn/yazio-mcp` решает это тулом `log_quick_entry` — POST на `/v15/user/consumed-items` с `simple_products`, без необходимости создавать продукт в базе. Бонусом — `log_food` (поиск + лог одним вызовом), локальные `favorites` и `presets` (умные «обычный завтрак»-команды), `update_consumed_item`/`remove_consumed_item` по имени.
+Дописанный тул `log_quick_entry` шлёт `POST /v15/user/consumed-items` с `simple_products` (тот же подход, что в [edgarcrssn/yazio-mcp](https://github.com/edgarcrssn/yazio-mcp)) — запись появляется в дневнике как обычный обед, без создания кастомного продукта в базе.
 
-Trade-off: пропадают тулы для воды, веса, упражнений, целей и настроек профиля. Если они понадобятся — придётся вернуться на fliptheweb или собрать гибрид.
+Пробовали целиком переключиться на edgarcrssn-форк ради всех его бонусов (favorites/presets/log_food), но он рвёт OpenAI Apps валидацию (видимо из-за более новой версии MCP SDK с extra-полями в `tools/list`). Поэтому остановились на минимальном диффе поверх fliptheweb.
 
 ## Стек
 
-- `yazio` — собственный образ. В Dockerfile клонируется `edgarcrssn/yazio-mcp` (commit запинен в `YAZIO_MCP_REF`), ставится через `npm install`, запускается `npx tsx src/index.ts` под `mcp-streamablehttp-proxy` на внутреннем порту 8000 (endpoint `/mcp`).
+- `yazio` — собственный образ, собирается из `yazio-mcp-src/`. Multi-stage: build-стадия делает `npm ci && npm run build`, runtime-стадия имеет только prod-зависимости + `mcp-streamablehttp-proxy` (Python). Запускается `node dist/index.js` под прокси на внутреннем порту 8000 (endpoint `/mcp`).
 - `caddy` — терминирует TLS на 443, автоматически получает сертификат от Let's Encrypt по HTTP-01 challenge (порт 80), проксирует на `yazio:8000`.
 
 OAuth не используется — единственный пользователь это я, креды Yazio лежат в `.env` на сервере.
-
-Volume `yazio_data` примонтирован в `/app/data` — там форк хранит `favorites.json` и `presets.json`. Без volume они теряются при пересборке.
 
 ## Деплой на VPS
 
@@ -39,27 +37,34 @@ curl -i https://example.duckdns.org/mcp
 # ожидается ответ от MCP-сервера (обычно 405/400 на GET без правильных заголовков — это норма, главное что TLS работает и проксирование живо)
 ```
 
-## Подключение в Claude mobile
+## Подключение в Claude / ChatGPT
 
-Settings → Connectors → Add custom connector:
+**Claude mobile/desktop:** Settings → Connectors → Add custom connector:
+- URL: `https://example.duckdns.org/mcp`
+- Auth: None
 
-- **URL:** `https://example.duckdns.org/mcp`
-- **Auth:** None
+**ChatGPT Apps:** Settings → Developer → New App:
+- MCP Server URL: `https://example.duckdns.org/mcp`
+- Authentication: No Auth
+- Подтвердить чекбокс «I understand and want to continue»
 
-## Обновление upstream
+## Обновление upstream fliptheweb
 
-В Dockerfile `ARG YAZIO_MCP_REF=...` указывает на конкретный commit. Чтобы взять свежий upstream:
+Исходники завендорены — обновление делается вручную:
 
 ```bash
-# на хосте, где собираешь:
-NEW_REF=$(git ls-remote https://github.com/edgarcrssn/yazio-mcp.git HEAD | awk '{print $1}')
-# поправить YAZIO_MCP_REF в Dockerfile, закоммитить
+cd /tmp && rm -rf yazio-mcp-upstream
+git clone https://github.com/fliptheweb/yazio-mcp.git yazio-mcp-upstream
+# review diff, перенести изменения в yazio-mcp-src/, не затронув log_quick_entry
 docker compose up -d --build
 ```
 
+Текущая база: `fliptheweb/yazio-mcp@3e11d2d`.
+
 ## Файлы
 
-- `docker-compose.yml` — два сервиса (yazio + caddy), volumes для caddy_data/caddy_config/yazio_data.
-- `Dockerfile` — клонирует и собирает форк edgarcrssn на запинённом коммите.
+- `docker-compose.yml` — два сервиса (yazio + caddy), volumes только для Caddy.
+- `Dockerfile` — multi-stage build из локального `yazio-mcp-src/`.
+- `yazio-mcp-src/` — завендоренный fliptheweb/yazio-mcp + патч с тулом `log_quick_entry` (`src/schemas.ts`, `src/index.ts`).
 - `Caddyfile` — один vhost `{$DOMAIN}` с reverse_proxy на `yazio:8000` и `flush_interval -1` (нужен для streaming-ответов MCP).
 - `.env.example` — шаблон. Реальный `.env` в git не коммитим.
