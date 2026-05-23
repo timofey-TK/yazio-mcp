@@ -48,6 +48,30 @@ curl -i https://timtk.duckdns.org/mcp
 - Authentication: No Auth
 - Подтвердить чекбокс «I understand and want to continue»
 
+## Навык Яндекс Алисы «Калории»
+
+Голосовая сводка калорий за день: «Алиса, запусти Калории» → один HTTP-запрос → ответ «Съедено X из Y ккал, осталось Z», сессия сразу закрывается.
+
+Сервис `alice` (`alice/`) — крошечный Node-webhook без зависимостей кроме `yazio`. Он **не ходит через MCP-протокол** (рукопожатие + SSE + JSON внутри текста — хрупко), а напрямую использует тот же `yazio` npm-клиент, что и MCP: логинится кредами из `.env` и зовёт `client.user.getDailySummary()`.
+
+Yazio не отдаёт «съедено» одним числом, поэтому webhook сам суммирует энергию по приёмам пищи (`meals[*].nutrients["energy.energy"]`), а цель берёт из `goals["energy.energy"]` (+ `activity_energy`, если Yazio добавляет активность в бюджет). «Сегодня» определяется в часовом поясе `TZ` (по умолчанию `Europe/Moscow`).
+
+**Доступ:** Яндекс.Диалоги не позволяют слать кастомные заголовки, поэтому секрет лежит в сегменте пути — `https://timtk.duckdns.org/alice/<ALICE_SECRET>`. Caddy роутит `/alice/*` на сервис, остальное — на MCP. Без секрета webhook отвечает 403.
+
+**Деплой:** добавить в `.env` `ALICE_SECRET` (`openssl rand -hex 16`) и при желании `TZ`, затем `docker compose up -d --build`.
+
+**Регистрация:** [dialogs.yandex.ru/developer](https://dialogs.yandex.ru/developer) → создать навык → Backend = Webhook URL → `https://timtk.duckdns.org/alice/<ALICE_SECRET>`.
+
+Проверка снаружи:
+
+```bash
+curl -s https://timtk.duckdns.org/alice/health            # {"ok":true}
+curl -s -X POST https://timtk.duckdns.org/alice/<ALICE_SECRET> \
+  -H 'Content-Type: application/json' \
+  -d '{"version":"1.0","session":{"session_id":"t"},"request":{"type":"SimpleUtterance"}}'
+# → {"version":"1.0","session":{...},"response":{"text":"Съедено ... ккал, осталось ...","tts":"...","end_session":true}}
+```
+
 ## Обновление upstream fliptheweb
 
 Исходники завендорены — обновление делается вручную:
@@ -63,8 +87,9 @@ docker compose up -d --build
 
 ## Файлы
 
-- `docker-compose.yml` — два сервиса (yazio + caddy), volumes только для Caddy.
+- `docker-compose.yml` — три сервиса (yazio + alice + caddy), volumes только для Caddy.
 - `Dockerfile` — multi-stage build из локального `yazio-mcp-src/`.
 - `yazio-mcp-src/` — завендоренный fliptheweb/yazio-mcp + патч с тулом `log_quick_entry` (`src/schemas.ts`, `src/index.ts`).
-- `Caddyfile` — один vhost `{$DOMAIN}` с reverse_proxy на `yazio:8000` и `flush_interval -1` (нужен для streaming-ответов MCP).
+- `alice/` — webhook навыка Алисы (`index.js`, `package.json`, `Dockerfile`).
+- `Caddyfile` — один vhost `{$DOMAIN}`: `/alice/*` → `alice:3000`, остальное → `yazio:8000` с `flush_interval -1` (нужен для streaming-ответов MCP).
 - `.env.example` — шаблон. Реальный `.env` в git не коммитим.

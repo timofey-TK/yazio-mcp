@@ -1,0 +1,17 @@
+{
+  "name": "alice-calories-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Yandex Alice skill webhook: voice daily-calories summary from Yazio",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "yazio": "^1.0.0"
+  }
+}

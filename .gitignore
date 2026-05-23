@@ -3,3 +3,5 @@
 .DS_Store
 yazio-mcp-src/node_modules/
 yazio-mcp-src/dist/
+alice/node_modules/
+alice/package-lock.json

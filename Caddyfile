@@ -3,7 +3,15 @@
 }
 
 {$DOMAIN} {
-    reverse_proxy yazio:8000 {
-        flush_interval -1
+    # Webhook навыка Алисы «Калории». Секрет — в сегменте пути (/alice/<секрет>),
+    # т.к. Яндекс.Диалоги не позволяют слать кастомные заголовки.
+    handle /alice/* {
+        reverse_proxy alice:3000
+    }
+
+    handle {
+        reverse_proxy yazio:8000 {
+            flush_interval -1
+        }
     }
 }

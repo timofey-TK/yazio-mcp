@@ -8,11 +8,23 @@ services:
     expose:
       - "8000"
 
+  alice:
+    build: ./alice
+    restart: unless-stopped
+    environment:
+      YAZIO_USERNAME: ${YAZIO_USERNAME}
+      YAZIO_PASSWORD: ${YAZIO_PASSWORD}
+      ALICE_SECRET: ${ALICE_SECRET}
+      TZ: ${TZ:-Europe/Moscow}
+    expose:
+      - "3000"
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - yazio
+      - alice
     ports:
       - "80:80"
       - "443:443"
