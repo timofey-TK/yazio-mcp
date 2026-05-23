@@ -1,0 +1,9 @@
+{
+    email {$EMAIL}
+}
+
+{$DOMAIN} {
+    reverse_proxy yazio:8000 {
+        flush_interval -1
+    }
+}
