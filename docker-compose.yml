@@ -1,17 +1,10 @@
 services:
   yazio:
-    image: supercorp/supergateway:latest
+    build: .
     restart: unless-stopped
     environment:
       YAZIO_USERNAME: ${YAZIO_USERNAME}
       YAZIO_PASSWORD: ${YAZIO_PASSWORD}
-    command:
-      - --stdio
-      - npx -y yazio-mcp
-      - --outputTransport
-      - streamableHttp
-      - --port
-      - "8000"
     expose:
       - "8000"
 
