@@ -41,6 +41,49 @@ async function fetchSummary(date) {
   }
 }
 
+// Кэш сводки в памяти. У Алисы на устройстве жёсткий таймаут (~2.5-3 с), а вызов
+// Yazio бывает медленным (до ~2 с) — поэтому отдаём кэш мгновенно, а свежесть
+// поддерживаем фоновым обновлением. Для «калорий за сегодня» задержка не критична.
+const REFRESH_MS = 90_000; // как часто обновляем в фоне
+const cache = { date: null, summary: null, ts: 0 };
+let refreshing = null;
+
+async function refreshCache() {
+  if (refreshing) return refreshing; // не запускаем параллельные обновления
+  const date = localToday();
+  refreshing = (async () => {
+    try {
+      const summary = await fetchSummary(date);
+      cache.date = date;
+      cache.summary = summary;
+      cache.ts = Date.now();
+    } catch (err) {
+      console.error('⚠️ не удалось обновить кэш сводки:', err?.message || err);
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+// Возвращает сводку для ответа Алисе. Если кэш свежий и за сегодня — мгновенно,
+// иначе блокирующе ждём первый запрос (только на холодном старте / смене даты).
+async function getSummary() {
+  const date = localToday();
+  const fresh = cache.summary && cache.date === date && Date.now() - cache.ts < REFRESH_MS;
+  if (fresh) {
+    return cache.summary;
+  }
+  if (cache.summary && cache.date === date) {
+    // есть устаревший кэш за сегодня — отдаём его сразу, обновляем в фоне
+    refreshCache();
+    return cache.summary;
+  }
+  // кэша за сегодня нет (холодный старт или новый день) — ждём живой вызов
+  await refreshCache();
+  return cache.summary;
+}
+
 // Yazio не отдаёт «съедено» одним числом — суммируем нутриент по приёмам пищи.
 function consumedNutrient(summary, key) {
   const meals = summary?.meals || {};
@@ -123,7 +166,8 @@ const server = createServer((req, res) => {
     try {
       const body = raw ? JSON.parse(raw) : {};
       session = body.session;
-      const summary = await fetchSummary(localToday());
+      const summary = await getSummary();
+      if (!summary) throw new Error('summary недоступен');
       return send(res, 200, aliceResponse(buildText(summary), session));
     } catch (err) {
       console.error('❌ Ошибка обработки запроса:', err?.message || err);
@@ -135,4 +179,6 @@ const server = createServer((req, res) => {
 
 server.listen(Number(PORT), '0.0.0.0', () => {
   console.error(`✅ Alice webhook слушает :${PORT} (TZ=${TZ}), путь /alice/<секрет>`);
+  refreshCache(); // прогрев кэша на старте, чтобы первый запрос был мгновенным
+  setInterval(refreshCache, REFRESH_MS); // поддерживаем кэш тёплым в фоне
 });
