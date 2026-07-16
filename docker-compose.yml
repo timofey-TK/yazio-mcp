@@ -19,6 +19,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       EMAIL: ${EMAIL}
+      MCP_TOKEN: ${MCP_TOKEN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

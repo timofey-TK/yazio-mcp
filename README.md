@@ -15,36 +15,53 @@ Upstream `fliptheweb/yazio-mcp` хорош, но `add_user_consumed_item` тре
 - `yazio` — собственный образ, собирается из `yazio-mcp-src/`. Multi-stage: build-стадия делает `npm ci && npm run build`, runtime-стадия имеет только prod-зависимости + `mcp-streamablehttp-proxy` (Python). Запускается `node dist/index.js` под прокси на внутреннем порту 8000 (endpoint `/mcp`).
 - `caddy` — терминирует TLS на 443, автоматически получает сертификат от Let's Encrypt по HTTP-01 challenge (порт 80), проксирует на `yazio:8000`.
 
-OAuth не используется — единственный пользователь это я, креды Yazio лежат в `.env` на сервере.
+## Доступ
 
-## Деплой на VPS
+OAuth не используется — сервер рассчитан на одного пользователя, креды Yazio лежат в `.env` на сервере.
 
-Требования: Ubuntu 24.04, Docker + docker compose, открытые порты 80 и 443, A-запись DuckDNS указывает на IP сервера.
+Эндпоинт закрыт **секретом в сегменте пути**: Caddy отдаёт наружу только `/<MCP_TOKEN>/*`, срезает префикс и проксирует на `yazio:8000`, всё остальное — `404`. Схема выбрана вместо `Authorization: Bearer`, потому что веб-коннекторы ChatGPT не позволяют задать кастомный заголовок (только No Auth / OAuth), а секрет в URL работает с любым клиентом.
+
+Ротация секрета: поменять `MCP_TOKEN` в `.env` и `docker compose restart caddy`. Учти, что секрет в URL попадает в логи Caddy и историю клиента — для single-user это осознанный компромисс.
+
+## Деплой
+
+Требования: Ubuntu 24.04, Docker + docker compose, открытые порты 80 и 443, DNS-запись домена указывает на IP сервера.
 
 ```bash
 git clone <this-repo-url> yazio-mcp && cd yazio-mcp
 cp .env.example .env
 chmod 600 .env
-nano .env   # вписать YAZIO_USERNAME и YAZIO_PASSWORD
+nano .env   # DOMAIN, EMAIL, YAZIO_USERNAME, YAZIO_PASSWORD, MCP_TOKEN
 docker compose up -d --build
 docker compose logs -f caddy   # дождаться "certificate obtained successfully"
 ```
 
-Проверка снаружи:
+`MCP_TOKEN` сгенерировать: `openssl rand -hex 32`.
+
+Проверка снаружи (подставить свои `DOMAIN` и `MCP_TOKEN`):
 
 ```bash
-curl -i https://example.duckdns.org/mcp
-# ожидается ответ от MCP-сервера (обычно 405/400 на GET без правильных заголовков — это норма, главное что TLS работает и проксирование живо)
+# без секрета — должен быть 404
+curl -s -o /dev/null -w '%{http_code}\n' https://<domain>/mcp
+
+# с секретом — MCP-хендшейк
+curl -s -X POST https://<domain>/<MCP_TOKEN>/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+# ожидается {"result":{...,"serverInfo":{"name":"yazio-mcp",...}},...}
 ```
+
+Caddyfile правится без пересборки образа, но Caddy не перечитывает примонтированный конфиг сам — нужен `docker compose restart caddy`.
 
 ## Подключение в Claude / ChatGPT
 
-**Claude mobile/desktop:** Settings → Connectors → Add custom connector:
-- URL: `https://example.duckdns.org/mcp`
-- Auth: None
+URL коннектора: `https://<domain>/<MCP_TOKEN>/mcp`
+
+**Claude mobile/desktop:** Settings → Connectors → Add custom connector → URL выше, Auth: None.
 
 **ChatGPT Apps:** Settings → Developer → New App:
-- MCP Server URL: `https://example.duckdns.org/mcp`
+- MCP Server URL: URL выше
 - Authentication: No Auth
 - Подтвердить чекбокс «I understand and want to continue»
 
@@ -66,5 +83,5 @@ docker compose up -d --build
 - `docker-compose.yml` — два сервиса (yazio + caddy), volumes только для Caddy.
 - `Dockerfile` — multi-stage build из локального `yazio-mcp-src/`.
 - `yazio-mcp-src/` — завендоренный fliptheweb/yazio-mcp + патч с тулом `log_quick_entry` (`src/schemas.ts`, `src/index.ts`).
-- `Caddyfile` — один vhost `{$DOMAIN}` с reverse_proxy на `yazio:8000` и `flush_interval -1` (нужен для streaming-ответов MCP).
+- `Caddyfile` — один vhost `{$DOMAIN}`: `handle_path /{$MCP_TOKEN}/*` → reverse_proxy на `yazio:8000` с `flush_interval -1` (нужен для streaming-ответов MCP), остальное — `404`.
 - `.env.example` — шаблон. Реальный `.env` в git не коммитим.

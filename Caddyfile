@@ -3,7 +3,15 @@
 }
 
 {$DOMAIN} {
-    reverse_proxy yazio:8000 {
-        flush_interval -1
+    # Секрет в пути: доступ только по /<MCP_TOKEN>/... — совместимо с клиентами
+    # без поддержки Authorization-заголовка (напр. ChatGPT). handle_path срезает
+    # /<MCP_TOKEN>, так что на бэкенд уходит чистый /mcp.
+    handle_path /{$MCP_TOKEN}/* {
+        reverse_proxy yazio:8000 {
+            flush_interval -1
+        }
     }
+
+    # Всё остальное (в т.ч. угадывание пути) — 404, без намёка на существование секрета.
+    respond 404
 }
